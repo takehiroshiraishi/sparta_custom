@@ -1,5 +1,9 @@
+/home/shiraishi/sparta-4Sep2024/src/fix_drop_conduction.cpp
+/home/shiraishi/sparta-4Sep2024/src/fix_drop_conduction.h
 /home/shiraishi/sparta-4Sep2024/src/surf_collide_evap_ref.cpp
 /home/shiraishi/sparta-4Sep2024/src/surf_collide_evap_ref.h
+/home/shiraishi/sparta-4Sep2024/src/surf_collide_evap_ref_drop.cpp
+/home/shiraishi/sparta-4Sep2024/src/surf_collide_evap_ref_drop.h
 /home/shiraishi/sparta-4Sep2024/src/surf_collide_evap_ref_part.cpp
 /home/shiraishi/sparta-4Sep2024/src/surf_collide_evap_ref_part.h
 /home/shiraishi/sparta-4Sep2024/src/surf_collide_evap_ref_curved.cpp
