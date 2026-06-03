@@ -249,7 +249,10 @@ void FixDropConduction::accumulate_heat()
     if (ibin < 0) ibin = 0;
     if (ibin >= nbins) ibin = nbins - 1;
     double area = surf->line_size(&lines[m]);
-    heat_local[ibin] += source_value(i) * area * latent;
+    // SPARTA's surface mflux is positive for net evaporation out of the surface
+    // and negative for net condensation into the surface.  Heat added to the
+    // liquid is therefore -mflux*latent: evaporation cools, condensation heats.
+    heat_local[ibin] += -source_value(i) * area * latent;
   }
 
   MPI_Allreduce(heat_local,heat_global,nbins,MPI_DOUBLE,MPI_SUM,world);
