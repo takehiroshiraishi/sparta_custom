@@ -27,7 +27,7 @@ enum{INT,DOUBLE};
 FixDropConduction::FixDropConduction(SPARTA *sparta, int narg, char **arg) :
   Fix(sparta,narg,arg)
 {
-  if (narg != 12 && narg != 13) error->all(FLERR,"Illegal fix drop/conduction command");
+  if (narg < 12) error->all(FLERR,"Illegal fix drop/conduction command");
   if (surf->implicit)
     error->all(FLERR,"Cannot use fix drop/conduction with implicit surfs");
   if (domain->dimension != 2)
@@ -60,12 +60,16 @@ FixDropConduction::FixDropConduction(SPARTA *sparta, int narg, char **arg) :
 
   id_density_custom = NULL;
   int ioffset = 0;
-  if (narg == 13) {
+  int remaining = narg - 12;
+  if (remaining > 0 && strcmp(arg[12],"mode") && strcmp(arg[12],"relax")) {
     n = strlen(arg[6]) + 1;
     id_density_custom = new char[n];
     strcpy(id_density_custom,arg[6]);
     ioffset = 1;
   }
+
+  int required = 12 + ioffset;
+  if (narg < required) error->all(FLERR,"Illegal fix drop/conduction command");
 
   twall = input->numeric(FLERR,arg[6+ioffset]);
   latent = input->numeric(FLERR,arg[7+ioffset]);
@@ -77,6 +81,25 @@ FixDropConduction::FixDropConduction(SPARTA *sparta, int narg, char **arg) :
   if (twall <= 0.0 || latent <= 0.0 || conductivity <= 0.0 ||
       liquid_rho <= 0.0 || liquid_cp <= 0.0 || nbins <= 0)
     error->all(FLERR,"Illegal fix drop/conduction command");
+
+  mode = TRANSIENT;
+  relaxation = 1.0;
+  int iarg = required;
+  while (iarg < narg) {
+    if (strcmp(arg[iarg],"mode") == 0) {
+      if (iarg+2 > narg) error->all(FLERR,"Illegal fix drop/conduction command");
+      if (strcmp(arg[iarg+1],"transient") == 0) mode = TRANSIENT;
+      else if (strcmp(arg[iarg+1],"steady") == 0) mode = STEADY;
+      else error->all(FLERR,"Illegal fix drop/conduction command");
+      iarg += 2;
+    } else if (strcmp(arg[iarg],"relax") == 0) {
+      if (iarg+2 > narg) error->all(FLERR,"Illegal fix drop/conduction command");
+      relaxation = input->numeric(FLERR,arg[iarg+1]);
+      if (relaxation <= 0.0 || relaxation > 1.0)
+        error->all(FLERR,"Illegal fix drop/conduction command");
+      iarg += 2;
+    } else error->all(FLERR,"Illegal fix drop/conduction command");
+  }
 
   ifix = -1;
   source_fix = NULL;
@@ -288,7 +311,8 @@ void FixDropConduction::accumulate_heat()
 void FixDropConduction::solve_temperature()
 {
   for (int i = 0; i < nbins; i++) {
-    double capdt = liquid_rho * liquid_cp * volume[i] / dtcond;
+    double capdt = 0.0;
+    if (mode == TRANSIENT) capdt = liquid_rho * liquid_cp * volume[i] / dtcond;
     double gdown = conductivity * width[i] / dy;
     double gup = (i == nbins-1) ? 0.0 : conductivity * width[i+1] / dy;
 
@@ -309,8 +333,10 @@ void FixDropConduction::solve_temperature()
     dp[i] = (rhs[i] - lower[i]*dp[i-1]) / denom;
   }
 
-  temperature[nbins-1] = dp[nbins-1];
-  for (int i = nbins-2; i >= 0; i--) temperature[i] = dp[i] - cp[i]*temperature[i+1];
+  for (int i = nbins-2; i >= 0; i--) dp[i] -= cp[i]*dp[i+1];
+
+  for (int i = 0; i < nbins; i++)
+    temperature[i] = (1.0 - relaxation)*temperature[i] + relaxation*dp[i];
 
   for (int i = 0; i < nbins; i++)
     if (temperature[i] <= 0.0 || !isfinite(temperature[i]))

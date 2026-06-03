@@ -15,6 +15,8 @@ FixStyle(drop/conduction,FixDropConduction)
 
 namespace SPARTA_NS {
 
+enum{TRANSIENT,STEADY};
+
 class FixDropConduction : public Fix {
  public:
   FixDropConduction(class SPARTA *, int, char **);
@@ -28,12 +30,12 @@ class FixDropConduction : public Fix {
   int groupbit;
   int ifix, source_index;
   int tindex, nindex, created_custom, created_density_custom;
-  int nbins, firstflag;
+  int nbins, firstflag, mode;
   char *id_source;
   char *id_custom;
   char *id_density_custom;
 
-  double twall, latent, conductivity, liquid_rho, liquid_cp;
+  double twall, latent, conductivity, liquid_rho, liquid_cp, relaxation;
   double ylo, yhi, dy, dtcond;
 
   class Fix *source_fix;
