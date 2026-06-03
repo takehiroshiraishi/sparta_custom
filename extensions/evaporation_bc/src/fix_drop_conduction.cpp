@@ -27,7 +27,7 @@ enum{INT,DOUBLE};
 FixDropConduction::FixDropConduction(SPARTA *sparta, int narg, char **arg) :
   Fix(sparta,narg,arg)
 {
-  if (narg != 12) error->all(FLERR,"Illegal fix drop/conduction command");
+  if (narg != 12 && narg != 13) error->all(FLERR,"Illegal fix drop/conduction command");
   if (surf->implicit)
     error->all(FLERR,"Cannot use fix drop/conduction with implicit surfs");
   if (domain->dimension != 2)
@@ -58,12 +58,21 @@ FixDropConduction::FixDropConduction(SPARTA *sparta, int narg, char **arg) :
   id_custom = new char[n];
   strcpy(id_custom,arg[5]);
 
-  twall = input->numeric(FLERR,arg[6]);
-  latent = input->numeric(FLERR,arg[7]);
-  conductivity = input->numeric(FLERR,arg[8]);
-  liquid_rho = input->numeric(FLERR,arg[9]);
-  liquid_cp = input->numeric(FLERR,arg[10]);
-  nbins = input->inumeric(FLERR,arg[11]);
+  id_density_custom = NULL;
+  int ioffset = 0;
+  if (narg == 13) {
+    n = strlen(arg[6]) + 1;
+    id_density_custom = new char[n];
+    strcpy(id_density_custom,arg[6]);
+    ioffset = 1;
+  }
+
+  twall = input->numeric(FLERR,arg[6+ioffset]);
+  latent = input->numeric(FLERR,arg[7+ioffset]);
+  conductivity = input->numeric(FLERR,arg[8+ioffset]);
+  liquid_rho = input->numeric(FLERR,arg[9+ioffset]);
+  liquid_cp = input->numeric(FLERR,arg[10+ioffset]);
+  nbins = input->inumeric(FLERR,arg[11+ioffset]);
 
   if (twall <= 0.0 || latent <= 0.0 || conductivity <= 0.0 ||
       liquid_rho <= 0.0 || liquid_cp <= 0.0 || nbins <= 0)
@@ -80,6 +89,20 @@ FixDropConduction::FixDropConduction(SPARTA *sparta, int narg, char **arg) :
       error->all(FLERR,"Fix drop/conduction custom temperature is not a double vector");
     created_custom = 0;
   }
+  if (id_density_custom) {
+    nindex = surf->find_custom(id_density_custom);
+    if (nindex < 0) {
+      nindex = surf->add_custom(id_density_custom,DOUBLE,0);
+      created_density_custom = 1;
+    } else {
+      if (surf->etype[nindex] != DOUBLE || surf->esize[nindex] != 0)
+        error->all(FLERR,"Fix drop/conduction custom density is not a double vector");
+      created_density_custom = 0;
+    }
+  } else {
+    nindex = -1;
+    created_density_custom = 0;
+  }
   firstflag = 1;
 
   temperature = heat_local = heat_global = volume = width = NULL;
@@ -92,6 +115,7 @@ FixDropConduction::~FixDropConduction()
 {
   delete [] id_source;
   delete [] id_custom;
+  delete [] id_density_custom;
   memory->destroy(temperature);
   memory->destroy(heat_local);
   memory->destroy(heat_global);
@@ -104,6 +128,7 @@ FixDropConduction::~FixDropConduction()
   memory->destroy(cp);
   memory->destroy(dp);
   if (created_custom && tindex >= 0) surf->remove_custom(tindex);
+  if (created_density_custom && nindex >= 0) surf->remove_custom(nindex);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -148,7 +173,7 @@ void FixDropConduction::init()
     memory->create(dp,nbins,"drop/conduction:dp");
     build_geometry();
     initialize_temperature();
-    write_surface_temperature();
+    write_surface_state();
   }
 
   dtcond = nevery * update->dt;
@@ -227,7 +252,7 @@ void FixDropConduction::end_of_step()
 
   accumulate_heat();
   solve_temperature();
-  write_surface_temperature();
+  write_surface_state();
 }
 
 /* ---------------------------------------------------------------------- */
@@ -294,9 +319,11 @@ void FixDropConduction::solve_temperature()
 
 /* ---------------------------------------------------------------------- */
 
-void FixDropConduction::write_surface_temperature()
+void FixDropConduction::write_surface_state()
 {
   double *tcustom = surf->edvec[surf->ewhich[tindex]];
+  double *ncustom = NULL;
+  if (nindex >= 0) ncustom = surf->edvec[surf->ewhich[nindex]];
   Surf::Line *lines;
   if (surf->distributed) lines = surf->mylines;
   else lines = surf->lines;
@@ -309,9 +336,26 @@ void FixDropConduction::write_surface_temperature()
     int ibin = static_cast<int>((ymid - ylo) / dy);
     if (ibin < 0) ibin = 0;
     if (ibin >= nbins) ibin = nbins - 1;
-    tcustom[i] = temperature[ibin];
+    double t = temperature[ibin];
+    tcustom[i] = t;
+    if (ncustom) ncustom[i] = saturation_pressure(t) / (update->boltz * t);
   }
   surf->estatus[tindex] = 0;
+  if (nindex >= 0) surf->estatus[nindex] = 0;
+}
+
+/* ---------------------------------------------------------------------- */
+
+double FixDropConduction::saturation_pressure(double temp) const
+{
+  // Antoine equation for water, pressure in Pa, temperature in K.
+  // This covers the near-room-temperature range used by these cases.
+  const double A = 8.07131;
+  const double B = 1730.63;
+  const double C = 233.426;
+  const double mmhg_to_pa = 133.32236842105263;
+  double temp_c = temp - 273.15;
+  return pow(10.0,A - B/(C + temp_c)) * mmhg_to_pa;
 }
 
 /* ---------------------------------------------------------------------- */

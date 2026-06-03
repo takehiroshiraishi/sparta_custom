@@ -27,10 +27,11 @@ class FixDropConduction : public Fix {
  private:
   int groupbit;
   int ifix, source_index;
-  int tindex, created_custom;
+  int tindex, nindex, created_custom, created_density_custom;
   int nbins, firstflag;
   char *id_source;
   char *id_custom;
+  char *id_density_custom;
 
   double twall, latent, conductivity, liquid_rho, liquid_cp;
   double ylo, yhi, dy, dtcond;
@@ -53,7 +54,8 @@ class FixDropConduction : public Fix {
   void initialize_temperature();
   void accumulate_heat();
   void solve_temperature();
-  void write_surface_temperature();
+  void write_surface_state();
+  double saturation_pressure(double) const;
   double source_value(int) const;
 };
 
