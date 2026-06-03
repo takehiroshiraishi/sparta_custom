@@ -30,7 +30,7 @@ class FixDropConduction : public Fix {
   int groupbit;
   int ifix, source_index;
   int tindex, nindex, created_custom, created_density_custom;
-  int nbins, firstflag, mode;
+  int nbins, firstflag, mode, surface_bins;
   char *id_source;
   char *id_custom;
   char *id_density_custom;
@@ -45,6 +45,7 @@ class FixDropConduction : public Fix {
   double *heat_global;
   double *volume;
   double *width;
+  double *yedge;
   double *lower;
   double *diag;
   double *upper;
@@ -53,6 +54,7 @@ class FixDropConduction : public Fix {
   double *dp;
 
   void build_geometry();
+  int find_bin(double) const;
   void initialize_temperature();
   void accumulate_heat();
   void solve_temperature();

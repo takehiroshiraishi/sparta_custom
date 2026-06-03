@@ -18,6 +18,9 @@
 #include "stdlib.h"
 #include "string.h"
 
+#include <algorithm>
+#include <vector>
+
 using namespace SPARTA_NS;
 
 enum{INT,DOUBLE};
@@ -76,10 +79,16 @@ FixDropConduction::FixDropConduction(SPARTA *sparta, int narg, char **arg) :
   conductivity = input->numeric(FLERR,arg[8+ioffset]);
   liquid_rho = input->numeric(FLERR,arg[9+ioffset]);
   liquid_cp = input->numeric(FLERR,arg[10+ioffset]);
-  nbins = input->inumeric(FLERR,arg[11+ioffset]);
+  if (strcmp(arg[11+ioffset],"surface") == 0) {
+    surface_bins = 1;
+    nbins = 0;
+  } else {
+    surface_bins = 0;
+    nbins = input->inumeric(FLERR,arg[11+ioffset]);
+  }
 
   if (twall <= 0.0 || latent <= 0.0 || conductivity <= 0.0 ||
-      liquid_rho <= 0.0 || liquid_cp <= 0.0 || nbins <= 0)
+      liquid_rho <= 0.0 || liquid_cp <= 0.0 || (!surface_bins && nbins <= 0))
     error->all(FLERR,"Illegal fix drop/conduction command");
 
   mode = TRANSIENT;
@@ -128,7 +137,7 @@ FixDropConduction::FixDropConduction(SPARTA *sparta, int narg, char **arg) :
   }
   firstflag = 1;
 
-  temperature = heat_local = heat_global = volume = width = NULL;
+  temperature = heat_local = heat_global = volume = width = yedge = NULL;
   lower = diag = upper = rhs = cp = dp = NULL;
 }
 
@@ -144,6 +153,7 @@ FixDropConduction::~FixDropConduction()
   memory->destroy(heat_global);
   memory->destroy(volume);
   memory->destroy(width);
+  memory->destroy(yedge);
   memory->destroy(lower);
   memory->destroy(diag);
   memory->destroy(upper);
@@ -183,18 +193,16 @@ void FixDropConduction::init()
 
   if (firstflag) {
     firstflag = 0;
+    build_geometry();
     memory->create(temperature,nbins,"drop/conduction:temperature");
     memory->create(heat_local,nbins,"drop/conduction:heat_local");
     memory->create(heat_global,nbins,"drop/conduction:heat_global");
-    memory->create(volume,nbins,"drop/conduction:volume");
-    memory->create(width,nbins+1,"drop/conduction:width");
     memory->create(lower,nbins,"drop/conduction:lower");
     memory->create(diag,nbins,"drop/conduction:diag");
     memory->create(upper,nbins,"drop/conduction:upper");
     memory->create(rhs,nbins,"drop/conduction:rhs");
     memory->create(cp,nbins,"drop/conduction:cp");
     memory->create(dp,nbins,"drop/conduction:dp");
-    build_geometry();
     initialize_temperature();
     write_surface_state();
   }
@@ -208,6 +216,7 @@ void FixDropConduction::build_geometry()
 {
   double local_ylo = 1.0e100;
   double local_yhi = -1.0e100;
+  std::vector<double> yvalues_local;
 
   Surf::Line *lines = surf->lines;
   int nlocal = surf->nlocal;
@@ -217,19 +226,57 @@ void FixDropConduction::build_geometry()
     if (lines[i].p2[1] < local_ylo) local_ylo = lines[i].p2[1];
     if (lines[i].p1[1] > local_yhi) local_yhi = lines[i].p1[1];
     if (lines[i].p2[1] > local_yhi) local_yhi = lines[i].p2[1];
+    if (surface_bins) {
+      yvalues_local.push_back(lines[i].p1[1]);
+      yvalues_local.push_back(lines[i].p2[1]);
+    }
   }
 
   MPI_Allreduce(&local_ylo,&ylo,1,MPI_DOUBLE,MPI_MIN,world);
   MPI_Allreduce(&local_yhi,&yhi,1,MPI_DOUBLE,MPI_MAX,world);
   if (yhi <= ylo) error->all(FLERR,"Fix drop/conduction could not determine droplet y extent");
+
+  if (surface_bins) {
+    int nlocal_values = static_cast<int>(yvalues_local.size());
+    std::vector<int> counts(comm->nprocs);
+    MPI_Allgather(&nlocal_values,1,MPI_INT,counts.data(),1,MPI_INT,world);
+    std::vector<int> displs(comm->nprocs);
+    int ntotal_values = 0;
+    for (int i = 0; i < comm->nprocs; i++) {
+      displs[i] = ntotal_values;
+      ntotal_values += counts[i];
+    }
+    std::vector<double> yvalues(ntotal_values);
+    MPI_Allgatherv(
+      yvalues_local.data(),nlocal_values,MPI_DOUBLE,
+      yvalues.data(),counts.data(),displs.data(),MPI_DOUBLE,world);
+
+    std::sort(yvalues.begin(),yvalues.end());
+    std::vector<double> unique_y;
+    for (double y : yvalues) {
+      if (unique_y.empty() || fabs(y - unique_y.back()) > 1.0e-14)
+        unique_y.push_back(y);
+    }
+    if (unique_y.size() < 2)
+      error->all(FLERR,"Fix drop/conduction could not determine surface-based bins");
+    nbins = static_cast<int>(unique_y.size()) - 1;
+    memory->create(yedge,nbins+1,"drop/conduction:yedge");
+    for (int i = 0; i <= nbins; i++) yedge[i] = unique_y[i];
+  } else {
+    memory->create(yedge,nbins+1,"drop/conduction:yedge");
+    for (int i = 0; i <= nbins; i++) yedge[i] = ylo + (yhi-ylo) * i / nbins;
+  }
   dy = (yhi - ylo) / nbins;
+
+  memory->create(volume,nbins,"drop/conduction:volume");
+  memory->create(width,nbins+1,"drop/conduction:width");
 
   double *width_local;
   memory->create(width_local,nbins+1,"drop/conduction:width_local");
   for (int i = 0; i <= nbins; i++) width_local[i] = 0.0;
 
   for (int ibin = 0; ibin <= nbins; ibin++) {
-    double y = ylo + ibin*dy;
+    double y = yedge[ibin];
     double xmax = 0.0;
     for (int i = 0; i < nlocal; i++) {
       if (!(lines[i].mask & groupbit)) continue;
@@ -255,7 +302,8 @@ void FixDropConduction::build_geometry()
   memory->destroy(width_local);
 
   for (int i = 0; i < nbins; i++) {
-    volume[i] = 0.5*(width[i] + width[i+1])*dy;
+    double dyi = yedge[i+1] - yedge[i];
+    volume[i] = 0.5*(width[i] + width[i+1])*dyi;
     if (volume[i] <= 0.0) volume[i] = 1.0e-300;
   }
 }
@@ -265,6 +313,19 @@ void FixDropConduction::build_geometry()
 void FixDropConduction::initialize_temperature()
 {
   for (int i = 0; i < nbins; i++) temperature[i] = twall;
+}
+
+/* ---------------------------------------------------------------------- */
+
+int FixDropConduction::find_bin(double y) const
+{
+  if (y <= yedge[0]) return 0;
+  if (y >= yedge[nbins]) return nbins - 1;
+  double *upper = std::upper_bound(yedge,yedge+nbins+1,y);
+  int ibin = static_cast<int>(upper - yedge) - 1;
+  if (ibin < 0) ibin = 0;
+  if (ibin >= nbins) ibin = nbins - 1;
+  return ibin;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -293,14 +354,12 @@ void FixDropConduction::accumulate_heat()
     int m = surf->distributed ? i : comm->me + i*comm->nprocs;
     if (!(lines[m].mask & groupbit)) continue;
     double ymid = 0.5*(lines[m].p1[1] + lines[m].p2[1]);
-    int ibin = static_cast<int>((ymid - ylo) / dy);
-    if (ibin < 0) ibin = 0;
-    if (ibin >= nbins) ibin = nbins - 1;
+    int ibin = find_bin(ymid);
     double area = surf->line_size(&lines[m]);
-    // SPARTA's surface mflux is positive for net evaporation out of the surface
-    // and negative for net condensation into the surface.  Heat added to the
-    // liquid is therefore -mflux*latent: evaporation cools, condensation heats.
-    heat_local[ibin] += -source_value(i) * area * latent;
+    // SPARTA compute surf mflux is positive for net mass entering the surface
+    // in this surface-collision/emission setup.  Positive condensation heats
+    // the liquid; negative evaporation cools it.
+    heat_local[ibin] += source_value(i) * area * latent;
   }
 
   MPI_Allreduce(heat_local,heat_global,nbins,MPI_DOUBLE,MPI_SUM,world);
@@ -313,8 +372,15 @@ void FixDropConduction::solve_temperature()
   for (int i = 0; i < nbins; i++) {
     double capdt = 0.0;
     if (mode == TRANSIENT) capdt = liquid_rho * liquid_cp * volume[i] / dtcond;
-    double gdown = conductivity * width[i] / dy;
-    double gup = (i == nbins-1) ? 0.0 : conductivity * width[i+1] / dy;
+    double center = 0.5*(yedge[i] + yedge[i+1]);
+    double down_distance = yedge[i+1] - yedge[i];
+    if (i > 0) down_distance = center - 0.5*(yedge[i-1] + yedge[i]);
+    double gdown = conductivity * width[i] / down_distance;
+    double gup = 0.0;
+    if (i < nbins-1) {
+      double up_distance = 0.5*(yedge[i+1] + yedge[i+2]) - center;
+      gup = conductivity * width[i+1] / up_distance;
+    }
 
     lower[i] = (i == 0) ? 0.0 : -gdown;
     upper[i] = (i == nbins-1) ? 0.0 : -gup;
@@ -359,9 +425,7 @@ void FixDropConduction::write_surface_state()
     int m = surf->distributed ? i : comm->me + i*comm->nprocs;
     if (!(lines[m].mask & groupbit)) continue;
     double ymid = 0.5*(lines[m].p1[1] + lines[m].p2[1]);
-    int ibin = static_cast<int>((ymid - ylo) / dy);
-    if (ibin < 0) ibin = 0;
-    if (ibin >= nbins) ibin = nbins - 1;
+    int ibin = find_bin(ymid);
     double t = temperature[ibin];
     tcustom[i] = t;
     if (ncustom) ncustom[i] = saturation_pressure(t) / (update->boltz * t);
