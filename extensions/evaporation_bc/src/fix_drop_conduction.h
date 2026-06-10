@@ -15,7 +15,7 @@ FixStyle(drop/conduction,FixDropConduction)
 
 namespace SPARTA_NS {
 
-enum{TRANSIENT,STEADY};
+enum{TRANSIENT,STEADY,STEADY2D};
 
 class FixDropConduction : public Fix {
  public:
@@ -31,12 +31,14 @@ class FixDropConduction : public Fix {
   int ifix, source_index;
   int tindex, nindex, created_custom, created_density_custom;
   int nbins, firstflag, mode, surface_bins;
+  int nx2d, ny2d, ncell2d, maxiter2d;
   char *id_source;
   char *id_custom;
   char *id_density_custom;
 
   double twall, latent, conductivity, liquid_rho, liquid_cp, relaxation;
   double ylo, yhi, dy, dtcond;
+  double grid2d, tolerance2d, xhi2d;
 
   class Fix *source_fix;
 
@@ -52,13 +54,24 @@ class FixDropConduction : public Fix {
   double *rhs;
   double *cp;
   double *dp;
+  double *temperature2d;
+  double *source2d;
+  double *source2d_local;
+  int *mask2d;
 
   void build_geometry();
+  void build_geometry_2d();
   int find_bin(double) const;
+  int cell_index_2d(int, int) const;
+  int find_cell_2d(double, double) const;
+  double width_at_y(double) const;
   void initialize_temperature();
   void accumulate_heat();
+  void accumulate_heat_2d();
   void solve_temperature();
+  void solve_temperature_2d();
   void write_surface_state();
+  void write_surface_state_2d();
   double saturation_pressure(double) const;
   double source_value(int) const;
 };
