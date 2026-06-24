@@ -14,7 +14,7 @@
 
 #ifdef SURF_COLLIDE_CLASS
 
-SurfCollideStyle(outletv,SurfCollideOutletVgradT)
+SurfCollideStyle(outletvgradT,SurfCollideOutletVgradT)
 
 #else
 
