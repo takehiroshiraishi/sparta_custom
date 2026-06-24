@@ -12,6 +12,8 @@
 /home/shiraishi/sparta-4Sep2024/src/surf_collide_evap_ref_part_curved.h
 /home/shiraishi/sparta-4Sep2024/src/surf_collide_outlet_v.cpp
 /home/shiraishi/sparta-4Sep2024/src/surf_collide_outlet_v.h
+/home/shiraishi/sparta-4Sep2024/src/surf_collide_outlet_v_gradT.cpp
+/home/shiraishi/sparta-4Sep2024/src/surf_collide_outlet_v_gradT.h
 /home/shiraishi/sparta-4Sep2024/src/surf_collide_outlet_v_parabolic.cpp
 /home/shiraishi/sparta-4Sep2024/src/surf_collide_outlet_v_parabolic.h
 /home/shiraishi/sparta-4Sep2024/src/surf_collide_outlet_vextra.cpp
